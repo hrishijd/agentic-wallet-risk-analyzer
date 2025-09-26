@@ -23,6 +23,7 @@ class FuturesPosition(Model):
     amount: float
     leverage: float
     status: str
+    usd_value: float
 
 
 class RiskRequest(Model):
