@@ -1,46 +1,9 @@
 from uagents import Agent, Context, Model
 from typing import List
+from models import RiskRequest, RiskResponse, TokenBalances, AppBalances, TokenBalance, AppBalance, ContractPosition, TokenPosition, App, Network
 
 # Replace with the actual on-chain address of your risk_advisor agent
-RISK_ADVISOR_ADDRESS = "agent1qf30d46w02h6qjp473a4wtu0xe2a42eva0sxvg3gv4zneuqcly8j5ukwcf4"  
-
-# ---------- Define the client agent ----------
-
-class TokenHolding(Model):
-    symbol: str
-    amount: float
-    usd_value: float
-
-
-class DexPosition(Model):
-    id: str
-    pool: str
-    token0: str
-    token1: str
-    liquidity: float
-    usd_value: float
-
-
-class FuturesPosition(Model):
-    id: str
-    market: str
-    amount: float
-    leverage: float
-    status: str
-    usd_value: float
-
-
-class RiskRequest(Model):
-    address: str
-    token_holdings: List[TokenHolding]
-    dex_positions: List[DexPosition]
-    futures_positions: List[FuturesPosition]
-
-
-class RiskResponse(Model):
-    recommended_tokens: List[str]
-    risk_score: float
-    reasoning: List[str]
+RISK_ADVISOR_ADDRESS = "agent1qf30d46w02h6qjp473a4wtu0xe2a42eva0sxvg3gv4zneuqcly8j5ukwcf4"
 
 client = Agent(
     name="risk_client",
@@ -54,19 +17,70 @@ client = Agent(
 async def startup(ctx: Context):
     ctx.logger.info("Client agent starting up...")
 
-    # Build a sample portfolio request
+    # Build a sample portfolio request using Zapper structure
     request = RiskRequest(
         address="0x1234abcd...",
-        token_holdings=[
-            TokenHolding(symbol="ETH", amount=1.2, usd_value=3000),
-            TokenHolding(symbol="USDC", amount=1000, usd_value=1000),
-        ],
-        dex_positions=[
-            DexPosition(id="1", pool="ETH-USDC", token0="ETH", token1="USDC", liquidity=2.0, usd_value=500),
-        ],
-        futures_positions=[
-            FuturesPosition(id="1", market="ETH-PERP", amount=2, leverage=3, status="open", usd_value=1200),
-        ],
+        token_balances=TokenBalances(
+            total_balance_usd=4000.0,
+            by_token=[
+                TokenBalance(
+                    token_address="0x0000000000000000000000000000000000000000",
+                    symbol="ETH",
+                    name="Ethereum",
+                    decimals=18.0,
+                    price=2500.0,
+                    balance=1.2,
+                    balance_usd=3000.0,
+                    balance_raw="1200000000000000000",
+                    network=Network(name="Ethereum", slug="ethereum"),
+                    img_url_v2="https://example.com/eth.png"
+                ),
+                TokenBalance(
+                    token_address="0xA0b86a33E6441e8C4E2C2C1E4e1E4E1E4E1E4E1E",
+                    symbol="USDC",
+                    name="USD Coin",
+                    decimals=6.0,
+                    price=1.0,
+                    balance=1000.0,
+                    balance_usd=1000.0,
+                    balance_raw="1000000000",
+                    network=Network(name="Ethereum", slug="ethereum"),
+                    img_url_v2="https://example.com/usdc.png"
+                ),
+            ]
+        ),
+        app_balances=AppBalances(
+            by_app=[
+                AppBalance(
+                    app=App(display_name="Uniswap V3", slug="uniswap-v3"),
+                    network=Network(name="Ethereum", slug="ethereum"),
+                    balances=[
+                        ContractPosition(
+                            address="0x1234567890123456789012345678901234567890",
+                            balance_usd=500.0,
+                            tokens=[
+                                TokenPosition(
+                                    meta_type="SUPPLIED",
+                                    token=TokenBalance(
+                                        token_address="0x0000000000000000000000000000000000000000",
+                                        symbol="ETH",
+                                        name="Ethereum",
+                                        decimals=18.0,
+                                        price=2500.0,
+                                        balance=0.2,
+                                        balance_usd=500.0,
+                                        balance_raw="200000000000000000",
+                                        network=Network(name="Ethereum", slug="ethereum"),
+                                        img_url_v2="https://example.com/eth.png"
+                                    )
+                                )
+                            ],
+                            display_props={"label": "ETH/USDC Pool", "images": ["https://example.com/eth.png"]}
+                        )
+                    ]
+                )
+            ]
+        )
     )
 
     # Send query to the risk_advisor agent

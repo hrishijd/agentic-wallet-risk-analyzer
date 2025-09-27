@@ -1,104 +1,236 @@
+from typing import List, Tuple
 from uagents import Agent, Context
-from models import RiskRequest, RiskResponse
+from models import RiskRequest, RiskResponse, TokenBalance, TokenPosition
 from hyperon import MeTTa
 import os
 from dotenv import load_dotenv
+import logging
+from dataclasses import dataclass
 
-# Load environment variables from .env file
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Load environment variables
 load_dotenv()
 
+# Enhanced MeTTa rules for a more sophisticated knowledge graph and risk scoring
+RISK_RULES = """
+; Helper to match and collect expressions
+(= (collect ?pattern) (match &self ?pattern ?pattern))
 
-RULES = """
-; Risk factor: concentration
-(= (risk-factor (holding ?addr ?token ?v) ?total)
-   (if (> ?v (* 0.5 ?total)) 0.3 0.0))
+; Get all asset holdings (wallet tokens + supplied + locked + claimable as assets)
+(= (get-all-holdings ?addr)
+   (collect (or (token-holding ?addr ?token ?symbol ?v)
+                (supplied ?addr ?token ?symbol ?v)
+                (locked ?addr ?token ?symbol ?v)
+                (claimable ?addr ?token ?symbol ?v))))
 
-; Risk factor: leverage
-(= (risk-factor (futures ?addr ?m ?lev ?val))
-   (if (> ?lev 2) 0.2 0.0))
+; Get all borrowed positions (liabilities)
+(= (get-borrowed ?addr)
+   (collect (borrowed ?addr ?token ?symbol ?v)))
 
-; Default
-(= (risk-factor _ _) 0.0)
+; Get all locked positions (for illiquidity)
+(= (get-locked ?addr)
+   (collect (locked ?addr ?token ?symbol ?v)))
 
-; Risk score: sum factors
-(= (risk-score ?addr ?total)
-   (sum (map (lambda $x (risk-factor $x ?total))
-             (concat (get-holdings ?addr)
-                     (get-dex ?addr)
-                     (get-futures ?addr)))))
+; Calculate total assets value
+(= (total-assets ?addr)
+   (sum (map (lambda $x (case $x ((_ _ _ $v) $v)))
+             (get-all-holdings ?addr))))
+
+; Calculate total liabilities (borrowed)
+(= (total-liabilities ?addr)
+   (sum (map (lambda $x (case $x ((_ _ _ $v) $v)))
+             (get-borrowed ?addr))))
+
+; Calculate total locked value
+(= (total-locked ?addr)
+   (sum (map (lambda $x (case $x ((_ _ _ $v) $v)))
+             (get-locked ?addr))))
+
+; Net worth (assets - liabilities)
+(= (net-worth ?addr)
+   (- (total-assets ?addr) (total-liabilities ?addr)))
+
+; Concentration risk using Herfindahl-Hirschman Index (HHI)
+; HHI = sum ( (v_i / total_assets)^2 ) * 10000
+; Low diversification if HHI > 2500, high if >5000
+(= (hhi ?addr)
+   (* 10000
+      (sum (map (lambda $x (case $x ((_ _ _ $v)
+                                    (pow (/ $v (total-assets ?addr)) 2))))
+                (get-all-holdings ?addr)))))
+
+(= (risk-factor-concentration ?addr)
+   (let $h (hhi ?addr)
+        (if (> $h 5000) 0.4
+            (if (> $h 2500) 0.2 0.0))))
+
+; Leverage risk: liabilities / assets
+; High if >0.5, medium if >0.2
+(= (leverage-ratio ?addr)
+   (/ (total-liabilities ?addr) (total-assets ?addr)))
+
+(= (risk-factor-leverage ?addr)
+   (let $l (leverage-ratio ?addr)
+        (if (> $l 0.5) 0.3
+            (if (> $l 0.2) 0.15 0.0))))
+
+; Illiquidity risk: locked / assets
+; High if >0.5, medium if >0.3
+(= (illiquidity-ratio ?addr)
+   (/ (total-locked ?addr) (total-assets ?addr)))
+
+(= (risk-factor-illiquidity ?addr)
+   (let $i (illiquidity-ratio ?addr)
+        (if (> $i 0.5) 0.25
+            (if (> $i 0.3) 0.1 0.0))))
+
+; Overall risk score: sum of all risk factors, normalized to 0-1
+(= (risk-score ?addr)
+   (let* ($conc (risk-factor-concentration ?addr)
+          $lev (risk-factor-leverage ?addr)
+          $ill (risk-factor-illiquidity ?addr)
+          $total (+ $conc $lev $ill))
+         (min 1.0 $total)))
 
 ; Recommendations
-(= (recommend ?addr USDC "High concentration in one token")
-   (holding ?addr ETH ?v)
-   (risk-factor (holding ?addr ETH ?v) ?t)
-   (> ?v (* 0.5 ?t)))
+; High concentration: recommend stablecoins like USDC
+(= (recommend ?addr USDC "High concentration risk - consider diversifying into stablecoins")
+   (> (hhi ?addr) 2500))
 
-(= (recommend ?addr BTC "Leverage exposure detected")
-   (futures ?addr ETH-PERP ?lev ?val)
-   (> ?lev 2))
+; High leverage: recommend BTC or ETH as hedge
+(= (recommend ?addr BTC "High leverage detected - consider hedging with volatile assets like BTC")
+   (> (leverage-ratio ?addr) 0.2))
+
+(= (recommend ?addr ETH "High leverage detected - consider hedging with volatile assets like ETH")
+   (> (leverage-ratio ?addr) 0.2))
+
+; High illiquidity: recommend liquid tokens
+(= (recommend ?addr USDC "High illiquidity from locked positions - add more liquid assets")
+   (> (illiquidity-ratio ?addr) 0.3))
+
+; General low risk recommendation
+(= (recommend ?addr NONE "No specific recommendations - portfolio is balanced")
+   (and (< (hhi ?addr) 2500)
+        (< (leverage-ratio ?addr) 0.2)
+        (< (illiquidity-ratio ?addr) 0.3)))
 """
 
+@dataclass
+class AnalysisResult:
+    """Data class to hold risk analysis results."""
+    risk_score: float
+    recommended_tokens: List[str]
+    reasoning: List[str]
 
-# ---------- Helper: Inject Atoms ----------
+class RiskAnalyzer:
+    """Class to handle risk analysis using an enhanced MeTTa knowledge graph."""
+    
+    def __init__(self):
+        self.metta = MeTTa()
+        self.metta.run(RISK_RULES)
+        logger.info("MeTTa engine initialized with enhanced risk rules")
 
-def build_atoms(req: RiskRequest):
-    atoms = []
-    addr = req.address
+    def build_atoms(self, req: RiskRequest) -> Tuple[List[str], float]:
+        """
+        Builds MeTTa atoms from RiskRequest and calculates total assets (for reference).
+        
+        Args:
+            req: RiskRequest object containing portfolio data
+            
+        Returns:
+            Tuple containing list of atoms and total assets value
+        """
+        try:
+            atoms = []
+            addr = req.address
+            # Total assets will be calculated in MeTTa, but we can precompute if needed
+            total_assets = req.token_balances.total_balance_usd
 
-    total_value = sum(h.usd_value for h in req.token_holdings) + \
-                  sum(d.usd_value for d in req.dex_positions) + \
-                  sum(f.usd_value for f in req.futures_positions)
+            # Add token holdings (wallet)
+            for token in req.token_balances.by_token:
+                atoms.append(f"(token-holding {addr} {token.token_address} {token.symbol} {token.balance_usd})")
+                total_assets += token.balance_usd  # Note: original total_balance_usd already sums by_token?
 
-    for h in req.token_holdings:
-        atoms.append(f"(holding {addr} {h.symbol} {h.usd_value})")
+            # Add app positions
+            for app_balance in req.app_balances.by_app:
+                for contract_pos in app_balance.balances:
+                    # contract_pos.balance_usd may be net, but we use token-level for granularity
+                    for token_pos in contract_pos.tokens:
+                        meta_type = token_pos.meta_type.lower()
+                        if meta_type in ["borrowed", "locked", "supplied", "claimable"]:
+                            atoms.append(f"({meta_type} {addr} {token_pos.token.token_address} "
+                                         f"{token_pos.token.symbol} {token_pos.token.balance_usd})")
+                            if meta_type in ["supplied", "locked", "claimable"]:
+                                total_assets += token_pos.token.balance_usd
+                            # Borrowed is liability, not added to assets
 
-    for d in req.dex_positions:
-        atoms.append(f"(dex {addr} {d.pool} {d.usd_value})")
+            return atoms, total_assets
+        except Exception as e:
+            logger.error(f"Error building atoms: {str(e)}")
+            raise
 
-    for f in req.futures_positions:
-        atoms.append(f"(futures {addr} {f.market} {f.leverage} {f.usd_value})")
+    def analyze(self, req: RiskRequest) -> RiskResponse:
+        """
+        Analyzes risk for a given portfolio using enhanced MeTTa rules.
+        
+        Args:
+            req: RiskRequest object containing portfolio data
+            
+        Returns:
+            RiskResponse object with analysis results
+        """
+        try:
+            # Input validation
+            if not req.address or not req.token_balances:
+                raise ValueError("Invalid RiskRequest: address and token balances are required")
 
-    atoms.append(f"(total-portfolio-value {total_value})")
-    return atoms, total_value
+            # Build atoms
+            atoms, _ = self.build_atoms(req)
+            
+            # Inject atoms into MeTTa
+            for atom in atoms:
+                self.metta.run(atom)
 
+            # Calculate risk score
+            rs = self.metta.run(f"(risk-score {req.address})")
+            risk_score = float(rs[0]) if rs and rs[0] else 0.0
 
-# ---------- Risk Analysis via MeTTa ----------
+            # Get recommendations
+            recs = self.metta.run(f"(recommend {req.address} ?token ?reason)")
+            recommended_tokens, reasoning = [], []
+            for rec in recs:
+                if rec:
+                    parts = str(rec).strip("()").split(maxsplit=3)
+                    if len(parts) >= 4:
+                        token = parts[2]
+                        if token != "NONE":
+                            recommended_tokens.append(token)
+                        reasoning.append(parts[3].strip('"'))
 
-def analyze_risk_metta(req: RiskRequest) -> RiskResponse:
-    m = MeTTa()
-    m.run(RULES)
+            # Default reasoning if no recommendations
+            if not reasoning:
+                reasoning = ["Portfolio appears well balanced with low risk factors."]
 
-    atoms, total_value = build_atoms(req)
-    for a in atoms:
-        m.run(a)
+            return RiskResponse(
+                recommended_tokens=recommended_tokens,
+                risk_score=risk_score,
+                reasoning=reasoning
+            )
+        except Exception as e:
+            logger.error(f"Error in risk analysis: {str(e)}")
+            return RiskResponse(
+                recommended_tokens=[],
+                risk_score=0.0,
+                reasoning=[f"Analysis failed: {str(e)}"]
+            )
 
-    # Risk score query
-    rs = m.run(f"(risk-score {req.address} {total_value})")
-    risk_score = float(rs[0]) if rs else 0.0
-
-    # Recommendations
-    recs = m.run(f"(recommend {req.address} ?token ?reason)")
-    recommendations, reasoning = [], []
-    for rec in recs:
-        parts = str(rec).strip("()").split()
-        if len(parts) >= 4:
-            token = parts[2]
-            reason = " ".join(parts[3:]).strip('"')
-            recommendations.append(token)
-            reasoning.append(reason)
-
-    if not recommendations:
-        reasoning = ["Portfolio appears well balanced."]
-
-    return RiskResponse(
-        recommended_tokens=recommendations,
-        risk_score=risk_score,
-        reasoning=reasoning,
-    )
-
-
-# ---------- Agent Definition ----------
-
+# Agent Definition
 agent = Agent(
     name="risk_advisor",
     seed=os.getenv("SEED_PHRASE", "default-seed-phrase"),
@@ -106,17 +238,41 @@ agent = Agent(
     endpoint=["http://localhost:8000/submit"],
 )
 
+# Initialize risk analyzer
+risk_analyzer = RiskAnalyzer()
 
 @agent.on_message(model=RiskRequest, replies=RiskResponse)
 async def handle_risk_request(ctx: Context, sender: str, req: RiskRequest):
-    ctx.logger.info(f"Received risk request for {sender}")
-    response = analyze_risk_metta(req)
+    """
+    Handles incoming risk analysis requests via agent messaging.
+    
+    Args:
+        ctx: Agent context
+        sender: Sender address
+        req: RiskRequest object
+    """
+    logger.info(f"Received risk request from {sender} for address {req.address}")
+    response = risk_analyzer.analyze(req)
     await ctx.send(sender, response)
 
 @agent.on_rest_post("/api/analyze", RiskRequest, RiskResponse)
-async def handle_risk_request(ctx: Context, req: RiskRequest):
-    ctx.logger.info(f"Received risk request on API")
-    return analyze_risk_metta(req)
+async def handle_rest_risk_request(ctx: Context, req: RiskRequest):
+    """
+    Handles incoming risk analysis requests via REST API.
+    
+    Args:
+        ctx: Agent context
+        req: RiskRequest object
+        
+    Returns:
+        RiskResponse object
+    """
+    logger.info(f"Received REST risk request for address {req.address}")
+    return risk_analyzer.analyze(req)
 
 if __name__ == "__main__":
-    agent.run()
+    try:
+        logger.info("Starting risk advisor agent...")
+        agent.run()
+    except Exception as e:
+        logger.error(f"Failed to start agent: {str(e)}")

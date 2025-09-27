@@ -1,36 +1,61 @@
 from uagents import Model
-from typing import List
+from typing import List, Optional
 
 
-class TokenHolding(Model):
+class Network(Model):
+    name: str
+    slug: str
+
+
+class TokenBalance(Model):
+    token_address: str
     symbol: str
-    amount: float
-    usd_value: float
+    name: str
+    decimals: float
+    price: float
+    balance: float
+    balance_usd: float
+    balance_raw: str
+    network: Network
+    img_url_v2: Optional[str] = None
 
 
-class DexPosition(Model):
-    id: str
-    pool: str
-    token0: str
-    token1: str
-    liquidity: float
-    usd_value: float
+class TokenBalances(Model):
+    total_balance_usd: float
+    by_token: List[TokenBalance]
 
 
-class FuturesPosition(Model):
-    id: str
-    market: str
-    amount: float
-    leverage: float
-    status: str
-    usd_value: float
+class App(Model):
+    display_name: str
+    slug: str
+
+
+class TokenPosition(Model):
+    meta_type: str  # SUPPLIED, BORROWED, CLAIMABLE, VESTING, LOCKED, NFT, WALLET
+    token: TokenBalance
+
+
+class ContractPosition(Model):
+    address: str
+    balance_usd: float
+    tokens: List[TokenPosition]
+    display_props: dict  # label, images
+
+
+class AppBalance(Model):
+    app: App
+    network: Network
+    balances: List[ContractPosition]
+
+
+class AppBalances(Model):
+    by_app: List[AppBalance]
 
 
 class RiskRequest(Model):
     address: str
-    token_holdings: List[TokenHolding]
-    dex_positions: List[DexPosition]
-    futures_positions: List[FuturesPosition]
+    token_balances: TokenBalances
+    app_balances: AppBalances
 
 
 class RiskResponse(Model):
