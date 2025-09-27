@@ -5,14 +5,29 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/gorilla/mux"
+	"github.com/joho/godotenv"
 
 	"dex-analyzer/internal/api"
 )
 
+// getEnvOrDefault gets an environment variable or returns a default value
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
 func main() {
-	port := flag.String("port", "8080", "Port to run the server on")
+	// Load environment variables from .env file
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found, using system environment variables")
+	}
+
+	port := flag.String("port", getEnvOrDefault("PORT", "8080"), "Port to run the server on")
 	flag.Parse()
 
 	// Initialize API server
