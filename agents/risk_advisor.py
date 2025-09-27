@@ -1,5 +1,6 @@
 from uagents import Agent, Context
 from models import RiskRequest, RiskResponse
+from hyperon import MeTTa
 import os
 from dotenv import load_dotenv
 
@@ -112,6 +113,10 @@ async def handle_risk_request(ctx: Context, sender: str, req: RiskRequest):
     response = analyze_risk_metta(req)
     await ctx.send(sender, response)
 
+@agent.on_rest_post("/api/analyze", RiskRequest, RiskResponse)
+async def handle_risk_request(ctx: Context, req: RiskRequest):
+    ctx.logger.info(f"Received risk request on API")
+    return analyze_risk_metta(req)
 
 if __name__ == "__main__":
     agent.run()

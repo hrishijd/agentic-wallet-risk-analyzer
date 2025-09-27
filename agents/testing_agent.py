@@ -1,7 +1,6 @@
 from uagents import Agent, Context, Model
 from typing import List
 
-
 # Replace with the actual on-chain address of your risk_advisor agent
 RISK_ADVISOR_ADDRESS = "agent1qf30d46w02h6qjp473a4wtu0xe2a42eva0sxvg3gv4zneuqcly8j5ukwcf4"  
 
