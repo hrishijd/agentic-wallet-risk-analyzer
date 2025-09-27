@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
-# Enhanced MeTTa rules for a more sophisticated knowledge graph and risk scoring
+# Enhanced MeTTa rules with fixes for parsing and calculations
 RISK_RULES = """
 ; Helper to match and collect expressions
 (= (collect ?pattern) (match &self ?pattern ?pattern))
@@ -39,17 +39,17 @@ RISK_RULES = """
 
 ; Calculate total assets value
 (= (total-assets ?addr)
-   (sum (map (lambda $x (case $x ((_ _ _ $v) $v)))
+   (sum (map (lambda $x (case $x ((_ _ _ _ $v) $v)))
              (get-all-holdings ?addr))))
 
 ; Calculate total liabilities (borrowed)
 (= (total-liabilities ?addr)
-   (sum (map (lambda $x (case $x ((_ _ _ $v) $v)))
+   (sum (map (lambda $x (case $x ((_ _ _ _ $v) $v)))
              (get-borrowed ?addr))))
 
 ; Calculate total locked value
 (= (total-locked ?addr)
-   (sum (map (lambda $x (case $x ((_ _ _ $v) $v)))
+   (sum (map (lambda $x (case $x ((_ _ _ _ $v) $v)))
              (get-locked ?addr))))
 
 ; Net worth (assets - liabilities)
@@ -60,10 +60,12 @@ RISK_RULES = """
 ; HHI = sum ( (v_i / total_assets)^2 ) * 10000
 ; Low diversification if HHI > 2500, high if >5000
 (= (hhi ?addr)
-   (* 10000
-      (sum (map (lambda $x (case $x ((_ _ _ $v)
-                                    (pow (/ $v (total-assets ?addr)) 2))))
-                (get-all-holdings ?addr)))))
+   (if (== (total-assets ?addr) 0) 0
+       (* 10000
+          (sum (map (lambda $x (case $x ((_ _ _ _ $v)
+                                        (let $share (/ $v (total-assets ?addr))
+                                             (* $share $share))))
+                    (get-all-holdings ?addr))))))
 
 (= (risk-factor-concentration ?addr)
    (let $h (hhi ?addr)
@@ -73,7 +75,8 @@ RISK_RULES = """
 ; Leverage risk: liabilities / assets
 ; High if >0.5, medium if >0.2
 (= (leverage-ratio ?addr)
-   (/ (total-liabilities ?addr) (total-assets ?addr)))
+   (if (== (total-assets ?addr) 0) 0
+       (/ (total-liabilities ?addr) (total-assets ?addr))))
 
 (= (risk-factor-leverage ?addr)
    (let $l (leverage-ratio ?addr)
@@ -83,7 +86,8 @@ RISK_RULES = """
 ; Illiquidity risk: locked / assets
 ; High if >0.5, medium if >0.3
 (= (illiquidity-ratio ?addr)
-   (/ (total-locked ?addr) (total-assets ?addr)))
+   (if (== (total-assets ?addr) 0) 0
+       (/ (total-locked ?addr) (total-assets ?addr))))
 
 (= (risk-factor-illiquidity ?addr)
    (let $i (illiquidity-ratio ?addr)
@@ -149,23 +153,21 @@ class RiskAnalyzer:
         try:
             atoms = []
             addr = req.address
-            # Total assets will be calculated in MeTTa, but we can precompute if needed
-            total_assets = req.token_balances.total_balance_usd
+            total_assets = 0.0  # Initialize to 0 to avoid double-counting
 
-            # Add token holdings (wallet)
+            # Add token holdings (wallet) and accumulate total_assets
             for token in req.token_balances.by_token:
-                atoms.append(f"(token-holding {addr} {token.token_address} {token.symbol} {token.balance_usd})")
-                total_assets += token.balance_usd  # Note: original total_balance_usd already sums by_token?
+                atoms.append(f'(token-holding "{addr}" "{token.token_address}" "{token.symbol}" {token.balance_usd})')
+                total_assets += token.balance_usd
 
-            # Add app positions
+            # Add app positions and accumulate total_assets for assets
             for app_balance in req.app_balances.by_app:
                 for contract_pos in app_balance.balances:
-                    # contract_pos.balance_usd may be net, but we use token-level for granularity
                     for token_pos in contract_pos.tokens:
                         meta_type = token_pos.meta_type.lower()
                         if meta_type in ["borrowed", "locked", "supplied", "claimable"]:
-                            atoms.append(f"({meta_type} {addr} {token_pos.token.token_address} "
-                                         f"{token_pos.token.symbol} {token_pos.token.balance_usd})")
+                            atoms.append(f'({meta_type} "{addr}" "{token_pos.token.token_address}" '
+                                         f'"{token_pos.token.symbol}" {token_pos.token.balance_usd})')
                             if meta_type in ["supplied", "locked", "claimable"]:
                                 total_assets += token_pos.token.balance_usd
                             # Borrowed is liability, not added to assets
@@ -191,18 +193,31 @@ class RiskAnalyzer:
                 raise ValueError("Invalid RiskRequest: address and token balances are required")
 
             # Build atoms
-            atoms, _ = self.build_atoms(req)
+            atoms, python_total_assets = self.build_atoms(req)
             
             # Inject atoms into MeTTa
             for atom in atoms:
                 self.metta.run(atom)
 
+            # Debug logging for key metrics
+            ta = self.metta.run(f'(total-assets "{req.address}")')
+            logger.info(f"Calculated total assets: {ta}")
+
+            tl = self.metta.run(f'(total-liabilities "{req.address}")')
+            logger.info(f"Calculated total liabilities: {tl}")
+
+            t_locked = self.metta.run(f'(total-locked "{req.address}")')
+            logger.info(f"Calculated total locked: {t_locked}")
+
+            h = self.metta.run(f'(hhi "{req.address}")')
+            logger.info(f"Calculated HHI: {h}")
+
             # Calculate risk score
-            rs = self.metta.run(f"(risk-score {req.address})")
+            rs = self.metta.run(f'(risk-score "{req.address}")')
             risk_score = float(rs[0]) if rs and rs[0] else 0.0
 
             # Get recommendations
-            recs = self.metta.run(f"(recommend {req.address} ?token ?reason)")
+            recs = self.metta.run(f'(recommend "{req.address}" ?token ?reason)')
             recommended_tokens, reasoning = [], []
             for rec in recs:
                 if rec:
