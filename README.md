@@ -14,7 +14,7 @@ DeFi Vision is a comprehensive crypto portfolio analyzer and dashboard. It provi
 
 ## Architecture
 - **Frontend:** React, TypeScript, Tailwind CSS, Vite
-- **Backend:** Go, mux, Zapper API integration
+- **Backend:** Go, Gin, Zapper API integration
 - **API:** `/analyze?address=<wallet_address>` returns portfolio, risk, and recommendations
 
 ## Setup
