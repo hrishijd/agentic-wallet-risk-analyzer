@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+
+	"github.com/google/uuid"
 )
 
 type Server struct {
@@ -184,11 +186,11 @@ func (s *Server) fetchPortfolioFromZapper(address string) (*RiskRequest, error) 
 
 // fetchTokenBalances fetches token balances using the exact curl query
 func (s *Server) fetchTokenBalances(address string) (*TokenBalances, error) {
-	query := `query TokenBalances($addresses: [Address!]!, $first: Int, $chainIds: [Int!]) {
-		portfolioV2(addresses: $addresses, chainIds: $chainIds) {
+	query := `query TokenBalances($addresses: [Address!]!) {
+		portfolioV2(addresses: $addresses) {
 			tokenBalances {
 				totalBalanceUSD
-				byToken(first: $first) {
+				byToken {
 					totalCount
 					edges {
 						node {
@@ -216,8 +218,6 @@ func (s *Server) fetchTokenBalances(address string) (*TokenBalances, error) {
 		Query: query,
 		Variables: map[string]interface{}{
 			"addresses": []string{address},
-			"first":     5,
-			"chainIds":  []int{8453}, // Base chain
 		},
 	}
 
@@ -236,11 +236,11 @@ func (s *Server) fetchTokenBalances(address string) (*TokenBalances, error) {
 
 // fetchAppBalances fetches app balances using the exact curl query
 func (s *Server) fetchAppBalances(address string) (*AppBalances, error) {
-	query := `query AppBalances($addresses: [Address!]!, $first: Int = 10) {
+	query := `query AppBalances($addresses: [Address!]!) {
 		portfolioV2(addresses: $addresses) {
 			appBalances {
 				totalBalanceUSD
-				byApp(first: $first) {
+				byApp {
 					totalCount
 					edges {
 						node {
@@ -257,7 +257,7 @@ func (s *Server) fetchAppBalances(address string) (*AppBalances, error) {
 								name
 								chainId
 							}
-							positionBalances(first: 10) {
+							positionBalances {
 								edges {
 									node {
 										... on AppTokenPositionBalance {
@@ -912,7 +912,119 @@ type RiskResponse struct {
 	Reasoning         []string `json:"reasoning"`
 }
 
-// AnalyzeWithASI fetches portfolio data from Zapper and calls the risk advisor API for analysis
+func (s *Server) callASI1(riskRequest RiskRequest) (*RiskResponse, error) {
+	reqJSON, err := json.Marshal(riskRequest)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal riskRequest: %w", err)
+	}
+
+	userContent := fmt.Sprintf(
+		`Analyze the following portfolio JSON and return recommendations using the tool schema provided: %s`,
+		string(reqJSON),
+	)
+
+	bodyObj := map[string]interface{}{
+		"model": "asi1-mini",
+		"messages": []map[string]string{
+			{"role": "user", "content": userContent},
+		},
+		"tools": []map[string]interface{}{
+			{
+				"type": "function",
+				"function": map[string]interface{}{
+					"name":        "analyze_portfolio_risk",
+					"description": "Analyze a user's DeFi portfolio and recommend risk-aware actions.",
+					"parameters": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"recommended_tokens": map[string]interface{}{
+								"type":        "array",
+								"items":       map[string]string{"type": "string"},
+								"description": "List of token symbols recommended for the user to hold or accumulate.",
+							},
+							"risk_score": map[string]interface{}{
+								"type":        "number",
+								"description": "Portfolio risk score from 0 (safe) to 1 (high risk).",
+							},
+							"reasoning": map[string]interface{}{
+								"type":        "array",
+								"items":       map[string]string{"type": "string"},
+								"description": "Explanations for the risk score and token recommendations.",
+							},
+						},git 
+						"required": []string{"recommended_tokens", "risk_score", "reasoning"},
+					},
+				},
+			},
+		},
+	}
+
+	bodyBytes, err := json.Marshal(bodyObj)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal ASI1 request: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", "https://api.asi1.ai/v1/chat/completions", bytes.NewBuffer(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	apiKey := os.Getenv("ASI_ONE_API_KEY")
+	if apiKey == "" {
+		return nil, fmt.Errorf("ASI_ONE_API_KEY not set")
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	sessionID := uuid.NewString()
+	req.Header.Set("x-session-id", sessionID)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("ASI1 request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ASI1 error %d: %s", resp.StatusCode, string(respBytes))
+	}
+
+	// Parse ASI1 response
+	var asiResp struct {
+		Choices []struct {
+			Message struct {
+				ToolCalls []struct {
+					Function struct {
+						Name      string `json:"name"`
+						Arguments string `json:"arguments"` // <-- now as string
+					} `json:"function"`
+				} `json:"tool_calls"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+
+	if err := json.Unmarshal(respBytes, &asiResp); err != nil {
+		return nil, fmt.Errorf("unmarshal ASI1 response failed: %w", err)
+	}
+
+	if len(asiResp.Choices) == 0 || len(asiResp.Choices[0].Message.ToolCalls) == 0 {
+		return nil, fmt.Errorf("ASI1 did not return tool call")
+	}
+
+	argsStr := asiResp.Choices[0].Message.ToolCalls[0].Function.Arguments
+
+	var riskResp RiskResponse
+	if err := json.Unmarshal([]byte(argsStr), &riskResp); err != nil {
+		return nil, fmt.Errorf("failed to parse tool call arguments: %w; raw=%s", err, argsStr)
+	}
+
+	return &riskResp, nil
+}
+
 func (s *Server) AnalyzeWithASI(w http.ResponseWriter, r *http.Request) {
 	address := r.URL.Query().Get("address")
 	if address == "" {
@@ -924,21 +1036,18 @@ func (s *Server) AnalyzeWithASI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch portfolio data from Zapper API
 	riskRequest, err := s.fetchPortfolioFromZapper(address)
 	if err != nil {
 		http.Error(w, "failed to fetch portfolio data: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Call the risk advisor API
-	riskResponse, err := s.callRiskAdvisorAPI(*riskRequest)
+	riskResponse, err := s.callASI1(*riskRequest)
 	if err != nil {
-		http.Error(w, "failed to get risk analysis: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "failed to call ASI1: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Return the risk analysis response
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(riskResponse)
 }
