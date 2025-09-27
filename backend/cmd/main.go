@@ -4,10 +4,9 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 
-	"github.com/gorilla/mux"
+	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 
 	"dex-analyzer/internal/api"
@@ -33,26 +32,34 @@ func main() {
 	// Initialize API server
 	server := api.NewServer()
 
-	// Set up router
-	r := mux.NewRouter()
+	// Set up Gin router
+	r := gin.Default()
 
 	// CORS middleware for localhost
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			w.Header().Set("Access-Control-Allow-Origin", "http://localhost:8081")
-			w.Header().Set("Access-Control-Allow-Methods", "GET")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-			next.ServeHTTP(w, req)
-		})
+	r.Use(func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "http://localhost:8081")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(200)
+			return
+		}
+		c.Next()
 	})
 
-	r.HandleFunc("/positions", server.GetPositions).Methods("GET")
-	r.HandleFunc("/analyze", server.AnalyzeWithASI).Methods("GET")
+	// Endpoints
+	r.GET("/positions", func(c *gin.Context) {
+		server.GetPositions(c.Writer, c.Request)
+	})
+
+	r.GET("/analyze", func(c *gin.Context) {
+		server.AnalyzeWithASI(c.Writer, c.Request)
+	})
 
 	// Start server
 	address := fmt.Sprintf(":%s", *port)
 	log.Printf("Starting server on %s", address)
-	if err := http.ListenAndServe(address, r); err != nil {
+	if err := r.Run(address); err != nil {
 		log.Fatalf("Error starting server: %v", err)
 	}
 }
