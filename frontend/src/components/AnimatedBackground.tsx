@@ -82,7 +82,7 @@ const AnimatedBackground = () => {
 
     // Animation loop
     const animate = () => {
-      ctx.fillStyle = 'rgba(215, 25, 8, 0.05)';
+      ctx.fillStyle = 'rgba(21, 32, 43, 0.05)';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       const nodes = nodesRef.current;
@@ -98,7 +98,7 @@ const AnimatedBackground = () => {
         const opacity = conn.opacity * pulseOpacity * 0.6;
 
         // Draw connection line
-        ctx.strokeStyle = `rgba(73, 166, 230, ${opacity})`;
+        ctx.strokeStyle = `rgba(102, 204, 255, ${opacity})`;
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(nodeA.x, nodeA.y);
@@ -116,7 +116,7 @@ const AnimatedBackground = () => {
           const x = nodeA.x + (nodeB.x - nodeA.x) * progress;
           const y = nodeA.y + (nodeB.y - nodeA.y) * progress;
           
-          ctx.fillStyle = `rgba(73, 166, 230, ${opacity * 2})`;
+          ctx.fillStyle = `rgba(102, 204, 255, ${opacity * 2})`;
           ctx.beginPath();
           ctx.arc(x, y, 1.5, 0, Math.PI * 2);
           ctx.fill();
@@ -164,7 +164,7 @@ const AnimatedBackground = () => {
         ctx.stroke();
 
         // Draw node label
-        ctx.fillStyle = 'rgba(210, 40, 95, 0.9)';
+        ctx.fillStyle = 'rgba(102, 204, 255, 0.9)';
         ctx.font = 'bold 10px monospace';
         ctx.textAlign = 'center';
         ctx.fillText(node.name, node.x, node.y - node.size - 8);

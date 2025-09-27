@@ -117,7 +117,7 @@ const Index = () => {
         <div className="container mx-auto px-4 py-8">
           <div className="flex items-center gap-3 mb-6">
             <Wallet className="h-8 w-8 text-primary-foreground" />
-            <h1 className="text-3xl font-bold text-primary-foreground">Crypto Portfolio Analyzer</h1>
+            <h1 className="text-3xl font-bold text-primary-foreground">DeFi Vision</h1>
           </div>
 
           {/* Wallet Connection */}
@@ -183,6 +183,71 @@ const Index = () => {
           </Card>
         </div>
       </div>
+
+      {/* Product Info Cards */}
+      {!isConnected && (
+        <div className="container mx-auto px-4 py-8 relative z-10">
+          {/* Large Feature Card */}
+          <div className="mb-8">
+            <Card className="bg-card/95 backdrop-blur-sm shadow-lg border-primary/20">
+              <CardContent className="p-8 text-center">
+                <h2 className="text-2xl font-bold mb-4 text-foreground">Advanced DeFi Portfolio Intelligence</h2>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                  <div className="space-y-2">
+                    <div className="text-3xl font-bold text-primary">10K+</div>
+                    <div className="text-sm font-medium text-foreground">Token Holdings Tracked</div>
+                    <div className="text-xs text-muted-foreground">Comprehensive token analysis</div>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="text-3xl font-bold text-primary">500+</div>
+                    <div className="text-sm font-medium text-foreground">DEX & DeFi Protocols</div>
+                    <div className="text-xs text-muted-foreground">Cross-protocol position tracking</div>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="text-3xl font-bold text-primary">50+</div>
+                    <div className="text-sm font-medium text-foreground">Blockchain Networks</div>
+                    <div className="text-xs text-muted-foreground">Multi-chain ecosystem support</div>
+                  </div>
+                </div>
+                <p className="text-foreground/80 max-w-2xl mx-auto">
+                  Real-time analysis of your complete DeFi footprint across all major chains and protocols
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Feature Cards Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <Card className="bg-card/95 backdrop-blur-sm shadow-card border-border/50">
+              <CardContent className="p-6">
+                <h3 className="font-semibold mb-2 text-foreground">Risk-Aware Portfolio Assistant</h3>
+                <p className="text-sm text-muted-foreground">Provides comprehensive DeFi portfolio analysis that works directly with Ethereum addresses.</p>
+              </CardContent>
+            </Card>
+            
+            <Card className="bg-card/95 backdrop-blur-sm shadow-card border-border/50">
+              <CardContent className="p-6">
+                <h3 className="font-semibold mb-2 text-foreground">AI Risk Advisor</h3>
+                <p className="text-sm text-muted-foreground">Analyzes wallet balances, DEX LP positions, and futures positions with AI-powered insights.</p>
+              </CardContent>
+            </Card>
+            
+            <Card className="bg-card/95 backdrop-blur-sm shadow-card border-border/50">
+              <CardContent className="p-6">
+                <h3 className="font-semibold mb-2 text-foreground">Smart Recommendations</h3>
+                <p className="text-sm text-muted-foreground">Returns risk scores, recommended tokens for diversification, and detailed reasoning.</p>
+              </CardContent>
+            </Card>
+            
+            <Card className="bg-card/95 backdrop-blur-sm shadow-card border-border/50">
+              <CardContent className="p-6">
+                <h3 className="font-semibold mb-2 text-foreground">Backend Integration</h3>
+                <p className="text-sm text-muted-foreground">Seamlessly integrates with wallets, portfolio dashboards, and dApps for execution-ready insights.</p>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      )}
 
       {/* Main Content */}
       <div className="container mx-auto px-4 py-8 relative z-10">
