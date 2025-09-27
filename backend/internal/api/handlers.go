@@ -907,9 +907,11 @@ type RiskRequest struct {
 }
 
 type RiskResponse struct {
-	RecommendedTokens []string `json:"recommended_tokens"`
-	RiskScore         float64  `json:"risk_score"`
-	Reasoning         []string `json:"reasoning"`
+	RecommendedTokens []string      `json:"recommended_tokens"`
+	RiskScore         float64       `json:"risk_score"`
+	Reasoning         []string      `json:"reasoning"`
+	TokenBalances     TokenBalances `json:"token_balances"`
+	AppBalances       AppBalances   `json:"app_balances"`
 }
 
 func (s *Server) callASI1(riskRequest RiskRequest) (*RiskResponse, error) {
@@ -951,7 +953,7 @@ func (s *Server) callASI1(riskRequest RiskRequest) (*RiskResponse, error) {
 								"items":       map[string]string{"type": "string"},
 								"description": "Explanations for the risk score and token recommendations.",
 							},
-						},git 
+						},
 						"required": []string{"recommended_tokens", "risk_score", "reasoning"},
 					},
 				},
@@ -1047,6 +1049,9 @@ func (s *Server) AnalyzeWithASI(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to call ASI1: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	riskResponse.AppBalances = riskRequest.AppBalances
+	riskResponse.TokenBalances = riskRequest.TokenBalances
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(riskResponse)

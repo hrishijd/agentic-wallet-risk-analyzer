@@ -35,6 +35,17 @@ func main() {
 
 	// Set up router
 	r := mux.NewRouter()
+
+	// CORS middleware for localhost
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "http://localhost:8081")
+			w.Header().Set("Access-Control-Allow-Methods", "GET")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			next.ServeHTTP(w, req)
+		})
+	})
+
 	r.HandleFunc("/positions", server.GetPositions).Methods("GET")
 	r.HandleFunc("/analyze", server.AnalyzeWithASI).Methods("GET")
 
